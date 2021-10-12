@@ -25,8 +25,10 @@ var (
 
 func init() {
 	errorChan = make(chan internal.BackendErrorObjectInput)
-
 	SetFlushInterval(10)
+}
+
+func Start() {
 	internal.Start(errorChan)
 }
 
