@@ -13,15 +13,15 @@ import (
 
 var (
 	errorChan chan internal.BackendErrorObjectInput
-)
 
-var contextKeys = struct {
-	HighlightRequestID string
-	HighlightSessionID string
-}{
-	HighlightRequestID: "highlightRequestID",
-	HighlightSessionID: "highlightSessionID",
-}
+	contextKeys = struct {
+		HighlightRequestID string
+		HighlightSessionID string
+	}{
+		HighlightRequestID: "highlightRequestID",
+		HighlightSessionID: "highlightSessionID",
+	}
+)
 
 func init() {
 	errorChan = make(chan internal.BackendErrorObjectInput)
