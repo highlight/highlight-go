@@ -45,6 +45,9 @@ func init() {
 }
 
 func makeRequest(errorsInput []BackendErrorObjectInput) {
+	if len(errorsInput) < 1 {
+		return
+	}
 	var mutation struct {
 		PushBackendPayload struct {
 		} `graphql:"pushBackendPayload(errors: $errors)"`
