@@ -28,6 +28,7 @@ func init() {
 	SetFlushInterval(10)
 }
 
+// Start is used to start the Highlight client's collection service
 func Start() {
 	internal.Start(errorChan)
 }
@@ -42,12 +43,12 @@ func InterceptRequest(r *http.Request) context.Context {
 
 func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.Context {
 	highlightReqDetails := r.Header.Get("X-Highlight-Request")
-	ids := strings.Split(highlightReqDetails, ":")
+	ids := strings.Split(highlightReqDetails, "/")
 	if len(ids) < 2 {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, contextKeys.HighlightRequestID, ids[0])
-	ctx = context.WithValue(ctx, contextKeys.HighlightSessionID, ids[1])
+	ctx = context.WithValue(ctx, contextKeys.HighlightSessionID, ids[0])
+	ctx = context.WithValue(ctx, contextKeys.HighlightRequestID, ids[1])
 	return ctx
 }
 
