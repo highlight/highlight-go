@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
-	internal "github.com/highlight-run/highlight-go/internal/errors"
+	"github.com/hasura/go-graphql-client"
 )
 
 var (
-	errorChan chan internal.BackendErrorObjectInput
+	errorChan     chan backendErrorObjectInput
+	flushInterval int
+	client        *graphql.Client
 
 	contextKeys = struct {
 		HighlightRequestID string
@@ -23,22 +25,47 @@ var (
 	}
 )
 
+type backendErrorObjectInput struct {
+	SessionID  string    `json:"session_id"`
+	RequestID  string    `json:"request_id"`
+	Event      string    `json:"event"`
+	Type       string    `json:"type"`
+	URL        string    `json:"url"`
+	Source     string    `json:"source"`
+	StackTrace string    `json:"stackTrace"`
+	Timestamp  time.Time `json:"timestamp"`
+	Payload    *string   `json:"payload"`
+}
+
+// init gets called once when you import the package
 func init() {
-	errorChan = make(chan internal.BackendErrorObjectInput)
+	errorChan = make(chan backendErrorObjectInput, 128)
+	client = graphql.NewClient("https://pub.highlight.run", nil)
 	SetFlushInterval(10)
 }
 
 // Start is used to start the Highlight client's collection service.
 // To use it, run `go highlight.Start()` once in your app.
 func Start() {
-	internal.Start(errorChan)
+	go func() {
+		for {
+			time.Sleep(time.Duration(flushInterval) * time.Second)
+			tempChanSize := len(errorChan)
+			fmt.Println("flushing: ", tempChanSize)
+			var flushedErrors []backendErrorObjectInput
+			for i := 0; i < tempChanSize; i++ {
+				flushedErrors = append(flushedErrors, <-errorChan)
+			}
+			makeRequest(flushedErrors)
+		}
+	}()
 }
 
 // SetFlushInterval allows you to override the amount of time in which the
 // Highlight client will collect errors before sending them to our backend.
 // - newFlushInterval is an integer representing seconds
 func SetFlushInterval(newFlushInterval int) {
-	internal.SetFlushInterval(newFlushInterval)
+	flushInterval = newFlushInterval
 }
 
 // InterceptRequest calls InterceptRequestWithContext using the request object's context
@@ -77,7 +104,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 		return err
 	}
 	tagsString := string(tagsBytes)
-	convertedError := internal.BackendErrorObjectInput{
+	convertedError := backendErrorObjectInput{
 		SessionID: fmt.Sprintf("%v", sessionID),
 		RequestID: fmt.Sprintf("%v", requestID),
 		Type:      "BACKEND",
@@ -94,4 +121,22 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	}
 	errorChan <- convertedError
 	return nil
+}
+
+func makeRequest(errorsInput []backendErrorObjectInput) {
+	if len(errorsInput) < 1 {
+		return
+	}
+	var mutation struct {
+		PushBackendPayload struct {
+		} `graphql:"pushBackendPayload(errors: $errors)"`
+	}
+	variables := map[string]interface{}{
+		"errors": errorsInput,
+	}
+
+	err := client.Mutate(context.Background(), &mutation, variables)
+	if err != nil {
+		return
+	}
 }
