@@ -9,9 +9,9 @@ import (
 // Middleware is a go-chi compatible middleware
 // use as follows:
 //
-// import highlight_chi "github.com/highlight-run/highlight-go/pkg/go-chi/middleware"
+// import highlightChi "github.com/highlight-run/highlight-go/pkg/go-chi/middleware"
 // ...
-// r.Use(highlight_chi.Middleware)
+// r.Use(highlightChi.Middleware)
 //
 func Middleware(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {

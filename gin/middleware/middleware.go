@@ -3,9 +3,9 @@ package middleware
 import (
 	"strings"
 
-	"github.com/highlight-run/highlight-go"
-
 	"github.com/gin-gonic/gin"
+
+	"github.com/highlight-run/highlight-go"
 )
 
 // Middleware is a gin compatible middleware
