@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hasura/go-graphql-client"
@@ -15,6 +16,9 @@ var (
 	errorChan     chan BackendErrorObjectInput
 	flushInterval int
 	client        *graphql.Client
+	interruptChan chan bool
+	wg            sync.WaitGroup
+	state         appState // 0 is idle, 1 is started, 2 is stopped
 
 	ContextKeys = struct {
 		RequestID string
@@ -29,6 +33,14 @@ const (
 	Highlight = "highlight"
 	RequestID = Highlight + "RequestID"
 	SessionID = Highlight + "SessionID"
+)
+
+type appState byte
+
+const (
+	idle    appState = 0
+	started appState = 1
+	stopped appState = 2
 )
 
 type BackendErrorObjectInput struct {
@@ -46,26 +58,58 @@ type BackendErrorObjectInput struct {
 // init gets called once when you import the package
 func init() {
 	errorChan = make(chan BackendErrorObjectInput, 128)
+	interruptChan = make(chan bool, 1)
 	client = graphql.NewClient("https://pub.highlight.run", nil)
 	SetFlushInterval(10)
 }
 
 // Start is used to start the Highlight client's collection service.
-// To use it, run `go highlight.Start()` once in your app.
 func Start() {
+	StartWithContext(context.Background())
+}
+
+// StartWithContext is used to start the Highlight client's collection
+// service, but allows the user to pass in their own context.Context.
+// This allows the user kill the highlight worker by canceling their context.CancelFunc.
+func StartWithContext(ctx context.Context) {
+	if state == started {
+		return
+	}
+	state = started
 	go func() {
 		for {
-			time.Sleep(time.Duration(flushInterval) * time.Second)
-			tempChanSize := len(errorChan)
-			fmt.Println("flushing: ", tempChanSize)
-			var flushedErrors []*BackendErrorObjectInput
-			for i := 0; i < tempChanSize; i++ {
-				e := <-errorChan
-				flushedErrors = append(flushedErrors, &e)
+			select {
+			case <-time.After(time.Duration(flushInterval) * time.Second):
+				time.Sleep(time.Duration(flushInterval) * time.Second)
+				wg.Add(1)
+				tempChanSize := len(errorChan)
+				var flushedErrors []*BackendErrorObjectInput
+				for i := 0; i < tempChanSize; i++ {
+					e := <-errorChan
+					if e == (BackendErrorObjectInput{}) {
+						continue
+					}
+					flushedErrors = append(flushedErrors, &e)
+				}
+				wg.Done()
+				makeRequest(flushedErrors)
+			case <-interruptChan:
+				shutdown()
+				return
+			case <-ctx.Done():
+				shutdown()
+				return
 			}
-			makeRequest(flushedErrors)
 		}
 	}()
+}
+
+// Stop sends an interrupt signal to the main process, closing the channels and returning the goroutines.
+func Stop() {
+	if state == stopped || state == idle {
+		return
+	}
+	interruptChan <- true
 }
 
 // SetFlushInterval allows you to override the amount of time in which the
@@ -96,6 +140,11 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 // ConsumeError adds an error to the queue of errors to be sent to our backend.
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) error {
+	if state == stopped {
+		return fmt.Errorf("highlight worker stopped")
+	}
+	defer wg.Done()
+	wg.Add(1)
 	timestamp := time.Now()
 	sessionID := ctx.Value(ContextKeys.SessionID)
 	if sessionID == nil {
@@ -145,4 +194,14 @@ func makeRequest(errorsInput []*BackendErrorObjectInput) {
 	if err != nil {
 		return
 	}
+}
+
+func shutdown() {
+	if state == stopped || state == idle {
+		return
+	}
+	state = stopped
+	wg.Wait()
+	close(errorChan)
+	close(interruptChan)
 }
