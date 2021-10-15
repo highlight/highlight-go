@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	errorChan     chan backendErrorObjectInput
+	errorChan     chan BackendErrorObjectInput
 	flushInterval int
 	client        *graphql.Client
 
@@ -31,21 +31,21 @@ const (
 	SessionID = Highlight + "SessionID"
 )
 
-type backendErrorObjectInput struct {
-	SessionID  string    `json:"session_id"`
-	RequestID  string    `json:"request_id"`
-	Event      string    `json:"event"`
-	Type       string    `json:"type"`
-	URL        string    `json:"url"`
-	Source     string    `json:"source"`
-	StackTrace string    `json:"stackTrace"`
-	Timestamp  time.Time `json:"timestamp"`
-	Payload    *string   `json:"payload"`
+type BackendErrorObjectInput struct {
+	SessionID  graphql.String  `json:"session_id"`
+	RequestID  graphql.String  `json:"request_id"`
+	Event      graphql.String  `json:"event"`
+	Type       graphql.String  `json:"type"`
+	URL        graphql.String  `json:"url"`
+	Source     graphql.String  `json:"source"`
+	StackTrace graphql.String  `json:"stackTrace"`
+	Timestamp  time.Time       `json:"timestamp"`
+	Payload    *graphql.String `json:"payload"`
 }
 
 // init gets called once when you import the package
 func init() {
-	errorChan = make(chan backendErrorObjectInput, 128)
+	errorChan = make(chan BackendErrorObjectInput, 128)
 	client = graphql.NewClient("https://pub.highlight.run", nil)
 	SetFlushInterval(10)
 }
@@ -58,9 +58,10 @@ func Start() {
 			time.Sleep(time.Duration(flushInterval) * time.Second)
 			tempChanSize := len(errorChan)
 			fmt.Println("flushing: ", tempChanSize)
-			var flushedErrors []backendErrorObjectInput
+			var flushedErrors []*BackendErrorObjectInput
 			for i := 0; i < tempChanSize; i++ {
-				flushedErrors = append(flushedErrors, <-errorChan)
+				e := <-errorChan
+				flushedErrors = append(flushedErrors, &e)
 			}
 			makeRequest(flushedErrors)
 		}
@@ -110,32 +111,31 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 		return err
 	}
 	tagsString := string(tagsBytes)
-	convertedError := backendErrorObjectInput{
-		SessionID: fmt.Sprintf("%v", sessionID),
-		RequestID: fmt.Sprintf("%v", requestID),
+	convertedError := BackendErrorObjectInput{
+		SessionID: graphql.String(fmt.Sprintf("%v", sessionID)),
+		RequestID: graphql.String(fmt.Sprintf("%v", requestID)),
 		Type:      "BACKEND",
 		Timestamp: timestamp,
-		Payload:   &tagsString,
+		Payload:   (*graphql.String)(&tagsString),
 	}
 	switch e := errorInput.(type) {
 	case error:
-		convertedError.Event = e.Error()
-		convertedError.StackTrace = e.Error()
+		convertedError.Event = graphql.String(e.Error())
+		convertedError.StackTrace = graphql.String(e.Error())
 	default:
-		convertedError.Event = fmt.Sprintf("%v", e)
-		convertedError.StackTrace = fmt.Sprintf("%v", e)
+		convertedError.Event = graphql.String(fmt.Sprintf("%v", e))
+		convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", e))
 	}
 	errorChan <- convertedError
 	return nil
 }
 
-func makeRequest(errorsInput []backendErrorObjectInput) {
+func makeRequest(errorsInput []*BackendErrorObjectInput) {
 	if len(errorsInput) < 1 {
 		return
 	}
 	var mutation struct {
-		PushBackendPayload struct {
-		} `graphql:"pushBackendPayload(errors: $errors)"`
+		PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
 	}
 	variables := map[string]interface{}{
 		"errors": errorsInput,
