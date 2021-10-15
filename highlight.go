@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hasura/go-graphql-client"
@@ -16,7 +17,8 @@ var (
 	flushInterval int
 	client        *graphql.Client
 	interruptChan chan bool
-	canceled      bool
+	wg            sync.WaitGroup
+	state         appState // 0 is idle, 1 is started, 2 is stopped
 
 	ContextKeys = struct {
 		RequestID string
@@ -31,6 +33,14 @@ const (
 	Highlight = "highlight"
 	RequestID = Highlight + "RequestID"
 	SessionID = Highlight + "SessionID"
+)
+
+type appState byte
+
+const (
+	idle    appState = 0
+	started appState = 1
+	stopped appState = 2
 )
 
 type backendErrorObjectInput struct {
@@ -63,6 +73,10 @@ func Start() {
 // service, but allows the user to pass in their own context.Context.
 // This allows the user kill the highlight worker by canceling their context.CancelFunc.
 func StartWithContext(ctx context.Context) {
+	if state == started {
+		return
+	}
+	state = started
 	go func() {
 		for {
 			select {
@@ -86,7 +100,7 @@ func StartWithContext(ctx context.Context) {
 
 // Stop sends an interrupt signal to the main process, closing the channels and returning the goroutines.
 func Stop() {
-	if canceled {
+	if state == stopped || state == idle {
 		return
 	}
 	interruptChan <- true
@@ -120,6 +134,11 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 // ConsumeError adds an error to the queue of errors to be sent to our backend.
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) error {
+	if state == stopped {
+		return fmt.Errorf("highlight worker stopped")
+	}
+	defer wg.Done()
+	wg.Add(1)
 	timestamp := time.Now()
 	sessionID := ctx.Value(ContextKeys.SessionID)
 	if sessionID == nil {
@@ -173,10 +192,11 @@ func makeRequest(errorsInput []backendErrorObjectInput) {
 }
 
 func shutdown() {
-	if canceled {
+	if state == stopped || state == idle {
 		return
 	}
+	state = stopped
+	wg.Wait()
 	close(errorChan)
 	close(interruptChan)
-	canceled = true
 }
