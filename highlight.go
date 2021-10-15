@@ -17,17 +17,18 @@ var (
 	client        *graphql.Client
 
 	ContextKeys = struct {
-		HighlightRequestID string
-		HighlightSessionID string
+		RequestID string
+		SessionID string
 	}{
-		HighlightRequestID: HighlightRequestID,
-		HighlightSessionID: HighlightSessionID,
+		RequestID: RequestID,
+		SessionID: SessionID,
 	}
 )
 
 const (
-	HighlightRequestID = "highlightRequestID"
-	HighlightSessionID = "highlightSessionID"
+	Highlight = "highlight"
+	RequestID = Highlight + "RequestID"
+	SessionID = Highlight + "SessionID"
 )
 
 type backendErrorObjectInput struct {
@@ -86,8 +87,8 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 	if len(ids) < 2 {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, ContextKeys.HighlightSessionID, ids[0])
-	ctx = context.WithValue(ctx, ContextKeys.HighlightRequestID, ids[1])
+	ctx = context.WithValue(ctx, ContextKeys.SessionID, ids[0])
+	ctx = context.WithValue(ctx, ContextKeys.RequestID, ids[1])
 	return ctx
 }
 
@@ -95,11 +96,11 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) error {
 	timestamp := time.Now()
-	sessionID := ctx.Value(ContextKeys.HighlightSessionID)
+	sessionID := ctx.Value(ContextKeys.SessionID)
 	if sessionID == nil {
 		return fmt.Errorf("context does not contain highlightSessionID; context must have injected values from highlight.InterceptRequest")
 	}
-	requestID := ctx.Value(ContextKeys.HighlightRequestID)
+	requestID := ctx.Value(ContextKeys.RequestID)
 	if requestID == nil {
 		return fmt.Errorf("context does not contain highlightRequestID; context must have injected values from highlight.InterceptRequest")
 	}
