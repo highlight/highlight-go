@@ -81,12 +81,17 @@ func StartWithContext(ctx context.Context) {
 			select {
 			case <-time.After(time.Duration(flushInterval) * time.Second):
 				time.Sleep(time.Duration(flushInterval) * time.Second)
+				wg.Add(1)
 				tempChanSize := len(errorChan)
 				var flushedErrors []*BackendErrorObjectInput
 				for i := 0; i < tempChanSize; i++ {
 					e := <-errorChan
+					if e == (BackendErrorObjectInput{}) {
+						continue
+					}
 					flushedErrors = append(flushedErrors, &e)
 				}
+				wg.Done()
 				makeRequest(flushedErrors)
 			case <-interruptChan:
 				shutdown()
