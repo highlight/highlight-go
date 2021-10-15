@@ -15,6 +15,8 @@ var (
 	errorChan     chan backendErrorObjectInput
 	flushInterval int
 	client        *graphql.Client
+	interruptChan chan bool
+	canceled      bool
 
 	ContextKeys = struct {
 		RequestID string
@@ -46,25 +48,48 @@ type backendErrorObjectInput struct {
 // init gets called once when you import the package
 func init() {
 	errorChan = make(chan backendErrorObjectInput, 128)
+	interruptChan = make(chan bool, 1)
+
 	client = graphql.NewClient("https://pub.highlight.run", nil)
 	SetFlushInterval(10)
 }
 
 // Start is used to start the Highlight client's collection service.
-// To use it, run `go highlight.Start()` once in your app.
 func Start() {
+	StartWithContext(context.Background())
+}
+
+// StartWithContext is used to start the Highlight client's collection
+// service, but allows the user to pass in their own context.Context.
+// This allows the user kill the highlight worker by canceling their context.CancelFunc.
+func StartWithContext(ctx context.Context) {
 	go func() {
 		for {
-			time.Sleep(time.Duration(flushInterval) * time.Second)
-			tempChanSize := len(errorChan)
-			fmt.Println("flushing: ", tempChanSize)
-			var flushedErrors []backendErrorObjectInput
-			for i := 0; i < tempChanSize; i++ {
-				flushedErrors = append(flushedErrors, <-errorChan)
+			select {
+			case <-time.After(time.Duration(flushInterval) * time.Second):
+				tempChanSize := len(errorChan)
+				var flushedErrors []backendErrorObjectInput
+				for i := 0; i < tempChanSize; i++ {
+					flushedErrors = append(flushedErrors, <-errorChan)
+				}
+				makeRequest(flushedErrors)
+			case <-interruptChan:
+				shutdown()
+				return
+			case <-ctx.Done():
+				shutdown()
+				return
 			}
-			makeRequest(flushedErrors)
 		}
 	}()
+}
+
+// Stop sends an interrupt signal to the main process, closing the channels and returning the goroutines.
+func Stop() {
+	if canceled {
+		return
+	}
+	interruptChan <- true
 }
 
 // SetFlushInterval allows you to override the amount of time in which the
@@ -145,4 +170,13 @@ func makeRequest(errorsInput []backendErrorObjectInput) {
 	if err != nil {
 		return
 	}
+}
+
+func shutdown() {
+	if canceled {
+		return
+	}
+	close(errorChan)
+	close(interruptChan)
+	canceled = true
 }
