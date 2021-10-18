@@ -1,4 +1,4 @@
-package middleware
+package chi
 
 import (
 	"net/http"
