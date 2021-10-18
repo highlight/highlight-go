@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/hasura/go-graphql-client"
@@ -17,6 +20,7 @@ var (
 	flushInterval int
 	client        *graphql.Client
 	interruptChan chan bool
+	signalChan    chan os.Signal
 	wg            sync.WaitGroup
 	state         appState // 0 is idle, 1 is started, 2 is stopped
 
@@ -59,6 +63,10 @@ type BackendErrorObjectInput struct {
 func init() {
 	errorChan = make(chan BackendErrorObjectInput, 128)
 	interruptChan = make(chan bool, 1)
+	signalChan = make(chan os.Signal, 1)
+
+	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM)
+
 	client = graphql.NewClient("https://pub.highlight.run", nil)
 	SetFlushInterval(10)
 }
@@ -94,6 +102,9 @@ func StartWithContext(ctx context.Context) {
 				wg.Done()
 				makeRequest(flushedErrors)
 			case <-interruptChan:
+				shutdown()
+				return
+			case <-signalChan:
 				shutdown()
 				return
 			case <-ctx.Done():
@@ -204,4 +215,5 @@ func shutdown() {
 	wg.Wait()
 	close(errorChan)
 	close(interruptChan)
+	close(signalChan)
 }
