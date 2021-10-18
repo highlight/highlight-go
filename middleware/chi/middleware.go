@@ -6,12 +6,12 @@ import (
 	"github.com/highlight-run/highlight-go"
 )
 
-// Middleware is a go-chi compatible middleware
+// Middleware is a chi compatible middleware
 // use as follows:
 //
-// import highlightChi "github.com/highlight-run/highlight-go/pkg/go-chi/middleware"
+// import highlightchi "github.com/highlight-run/highlight-go/middleware/chi"
 // ...
-// r.Use(highlightChi.Middleware)
+// r.Use(highlightchi.Middleware)
 //
 func Middleware(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
