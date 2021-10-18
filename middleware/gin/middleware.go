@@ -11,9 +11,9 @@ import (
 // Middleware is a gin compatible middleware
 // use as follows:
 //
-// import highlightGin "github.com/highlight-run/highlight-go/pkg/gin/middleware"
+// import highlightgin "github.com/highlight-run/highlight-go/middleware/gin"
 // ...
-// r.Use(highlightGin.Middleware())
+// r.Use(highlightgin.Middleware())
 //
 func Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
