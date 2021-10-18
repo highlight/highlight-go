@@ -38,9 +38,9 @@ const (
 type appState byte
 
 const (
-	idle    appState = 0
-	started appState = 1
-	stopped appState = 2
+	idle appState = iota
+	started
+	stopped
 )
 
 type BackendErrorObjectInput struct {
