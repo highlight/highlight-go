@@ -65,7 +65,7 @@ func init() {
 	interruptChan = make(chan bool, 1)
 	signalChan = make(chan os.Signal, 1)
 
-	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM)
+	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 
 	client = graphql.NewClient("https://pub.highlight.run", nil)
 	SetFlushInterval(10)
