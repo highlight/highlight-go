@@ -50,7 +50,7 @@ const (
 )
 
 type BackendErrorObjectInput struct {
-	SessionSecureID graphql.String  `json:"session_id"`
+	SessionSecureID graphql.String  `json:"session_secure_id"`
 	RequestID       graphql.String  `json:"request_id"`
 	Event           graphql.String  `json:"event"`
 	Type            graphql.String  `json:"type"`
