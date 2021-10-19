@@ -31,6 +31,8 @@ var (
 		RequestID: RequestID,
 		SessionID: SessionID,
 	}
+
+	graphqlClientAddress string
 )
 
 const (
@@ -66,8 +68,7 @@ func init() {
 	signalChan = make(chan os.Signal, 1)
 
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
-
-	client = graphql.NewClient("https://pub.highlight.run", nil)
+	SetGraphqlClientAddress("https://pub.highlight.run")
 	SetFlushInterval(10)
 }
 
@@ -83,6 +84,7 @@ func StartWithContext(ctx context.Context) {
 	if state == started {
 		return
 	}
+	client = graphql.NewClient(graphqlClientAddress, nil)
 	state = started
 	go func() {
 		for {
@@ -128,6 +130,12 @@ func Stop() {
 // - newFlushInterval is an integer representing seconds
 func SetFlushInterval(newFlushInterval int) {
 	flushInterval = newFlushInterval
+}
+
+// SetGraphqlClientAddress allows you to override the graphql client address,
+// in case you are running Highlight on-prem, and need to point to your on-prem instance.
+func SetGraphqlClientAddress(newGraphqlClientAddress string) {
+	graphqlClientAddress = newGraphqlClientAddress
 }
 
 // InterceptRequest calls InterceptRequestWithContext using the request object's context
