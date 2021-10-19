@@ -25,20 +25,20 @@ var (
 	state         appState // 0 is idle, 1 is started, 2 is stopped
 
 	ContextKeys = struct {
-		RequestID string
-		SessionID string
+		RequestID       string
+		SessionSecureID string
 	}{
-		RequestID: RequestID,
-		SessionID: SessionID,
+		RequestID:       RequestID,
+		SessionSecureID: SessionSecureID,
 	}
 
 	graphqlClientAddress string
 )
 
 const (
-	Highlight = "highlight"
-	RequestID = Highlight + "RequestID"
-	SessionID = Highlight + "SessionID"
+	Highlight       = "highlight"
+	RequestID       = Highlight + "RequestID"
+	SessionSecureID = Highlight + "SessionSecureID"
 )
 
 type appState byte
@@ -50,15 +50,15 @@ const (
 )
 
 type BackendErrorObjectInput struct {
-	SessionID  graphql.String  `json:"session_id"`
-	RequestID  graphql.String  `json:"request_id"`
-	Event      graphql.String  `json:"event"`
-	Type       graphql.String  `json:"type"`
-	URL        graphql.String  `json:"url"`
-	Source     graphql.String  `json:"source"`
-	StackTrace graphql.String  `json:"stackTrace"`
-	Timestamp  time.Time       `json:"timestamp"`
-	Payload    *graphql.String `json:"payload"`
+	SessionSecureID graphql.String  `json:"session_id"`
+	RequestID       graphql.String  `json:"request_id"`
+	Event           graphql.String  `json:"event"`
+	Type            graphql.String  `json:"type"`
+	URL             graphql.String  `json:"url"`
+	Source          graphql.String  `json:"source"`
+	StackTrace      graphql.String  `json:"stackTrace"`
+	Timestamp       time.Time       `json:"timestamp"`
+	Payload         *graphql.String `json:"payload"`
 }
 
 // init gets called once when you import the package
@@ -151,7 +151,7 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 	if len(ids) < 2 {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, ContextKeys.SessionID, ids[0])
+	ctx = context.WithValue(ctx, ContextKeys.SessionSecureID, ids[0])
 	ctx = context.WithValue(ctx, ContextKeys.RequestID, ids[1])
 	return ctx
 }
@@ -165,9 +165,9 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	defer wg.Done()
 	wg.Add(1)
 	timestamp := time.Now()
-	sessionID := ctx.Value(ContextKeys.SessionID)
-	if sessionID == nil {
-		return fmt.Errorf("context does not contain highlightSessionID; context must have injected values from highlight.InterceptRequest")
+	sessionSecureID := ctx.Value(ContextKeys.SessionSecureID)
+	if sessionSecureID == nil {
+		return fmt.Errorf("context does not contain highlightSessionSecureID; context must have injected values from highlight.InterceptRequest")
 	}
 	requestID := ctx.Value(ContextKeys.RequestID)
 	if requestID == nil {
@@ -180,11 +180,11 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	}
 	tagsString := string(tagsBytes)
 	convertedError := BackendErrorObjectInput{
-		SessionID: graphql.String(fmt.Sprintf("%v", sessionID)),
-		RequestID: graphql.String(fmt.Sprintf("%v", requestID)),
-		Type:      "BACKEND",
-		Timestamp: timestamp,
-		Payload:   (*graphql.String)(&tagsString),
+		SessionSecureID: graphql.String(fmt.Sprintf("%v", sessionSecureID)),
+		RequestID:       graphql.String(fmt.Sprintf("%v", requestID)),
+		Type:            "BACKEND",
+		Timestamp:       timestamp,
+		Payload:         (*graphql.String)(&tagsString),
 	}
 	switch e := errorInput.(type) {
 	case error:
