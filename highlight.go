@@ -25,6 +25,8 @@ var (
 	graphqlClientAddress string
 )
 
+// contextKey represents the keys that highlight may store in the users' context
+// we append every contextKey with Highlight to avoid collisions
 type contextKey string
 
 const (
@@ -43,6 +45,8 @@ var (
 	}
 )
 
+// appState is used for keeping track of the current state of the app
+// this can determine whether to accept new errors
 type appState byte
 
 const (
@@ -53,6 +57,18 @@ const (
 
 var (
 	state appState // 0 is idle, 1 is started, 2 is stopped
+)
+
+// Requester is used for making graphql requests
+// in testing, a mock requester with an overwritten trigger function may be used
+type Requester interface {
+	trigger([]*BackendErrorObjectInput)
+}
+
+type graphqlRequester struct{}
+
+var (
+	requester Requester
 )
 
 type BackendErrorObjectInput struct {
@@ -76,6 +92,8 @@ func init() {
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
 	SetFlushInterval(10)
+
+	requester = graphqlRequester{}
 }
 
 // Start is used to start the Highlight client's collection service.
@@ -108,7 +126,7 @@ func StartWithContext(ctx context.Context) {
 					flushedErrors = append(flushedErrors, &e)
 				}
 				wg.Done()
-				makeRequest(flushedErrors)
+				requester.trigger(flushedErrors)
 			case <-interruptChan:
 				shutdown()
 				return
@@ -204,7 +222,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	return nil
 }
 
-func makeRequest(errorsInput []*BackendErrorObjectInput) {
+func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput) {
 	if len(errorsInput) < 1 {
 		return
 	}
