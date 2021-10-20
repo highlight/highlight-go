@@ -25,6 +25,8 @@ var (
 	graphqlClientAddress string
 )
 
+// contextKey represents the keys that highlight may store in the users' context
+// we append every contextKey with Highlight to avoid collisions
 type contextKey string
 
 const (
@@ -43,6 +45,8 @@ var (
 	}
 )
 
+// appState is used for keeping track of the current state of the app
+// this can determine whether to accept new errors
 type appState byte
 
 const (
