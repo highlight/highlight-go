@@ -16,29 +16,31 @@ import (
 )
 
 var (
-	errorChan     chan BackendErrorObjectInput
-	flushInterval int
-	client        *graphql.Client
-	interruptChan chan bool
-	signalChan    chan os.Signal
-	wg            sync.WaitGroup
-	state         appState // 0 is idle, 1 is started, 2 is stopped
+	errorChan            chan BackendErrorObjectInput
+	flushInterval        int
+	client               *graphql.Client
+	interruptChan        chan bool
+	signalChan           chan os.Signal
+	wg                   sync.WaitGroup
+	graphqlClientAddress string
+)
 
+type contextKey string
+
+const (
+	Highlight       contextKey = "highlight"
+	RequestID                  = Highlight + "RequestID"
+	SessionSecureID            = Highlight + "SessionSecureID"
+)
+
+var (
 	ContextKeys = struct {
-		RequestID       string
-		SessionSecureID string
+		RequestID       contextKey
+		SessionSecureID contextKey
 	}{
 		RequestID:       RequestID,
 		SessionSecureID: SessionSecureID,
 	}
-
-	graphqlClientAddress string
-)
-
-const (
-	Highlight       = "highlight"
-	RequestID       = Highlight + "RequestID"
-	SessionSecureID = Highlight + "SessionSecureID"
 )
 
 type appState byte
@@ -47,6 +49,10 @@ const (
 	idle appState = iota
 	started
 	stopped
+)
+
+var (
+	state appState // 0 is idle, 1 is started, 2 is stopped
 )
 
 type BackendErrorObjectInput struct {
