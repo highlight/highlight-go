@@ -59,6 +59,18 @@ var (
 	state appState // 0 is idle, 1 is started, 2 is stopped
 )
 
+// Requester is used for making graphql requests
+// in testing, a mock requester with an overwritten trigger function may be used
+type Requester interface {
+	trigger([]*BackendErrorObjectInput)
+}
+
+type graphqlRequester struct{}
+
+var (
+	requester Requester
+)
+
 type BackendErrorObjectInput struct {
 	SessionSecureID graphql.String  `json:"session_secure_id"`
 	RequestID       graphql.String  `json:"request_id"`
@@ -80,6 +92,8 @@ func init() {
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
 	SetFlushInterval(10)
+
+	requester = graphqlRequester{}
 }
 
 // Start is used to start the Highlight client's collection service.
@@ -112,7 +126,7 @@ func StartWithContext(ctx context.Context) {
 					flushedErrors = append(flushedErrors, &e)
 				}
 				wg.Done()
-				makeRequest(flushedErrors)
+				requester.trigger(flushedErrors)
 			case <-interruptChan:
 				shutdown()
 				return
@@ -208,7 +222,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	return nil
 }
 
-func makeRequest(errorsInput []*BackendErrorObjectInput) {
+func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput) {
 	if len(errorsInput) < 1 {
 		return
 	}
