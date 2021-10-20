@@ -1,0 +1,35 @@
+name: "Golang code checks"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  go-essentials:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Format
+        uses: Jerome1337/gofmt-action@v1.0.4
+        with:
+          gofmt-path: '.'
+          gofmt-flags: '-l -d'
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v2
+        with:
+          args: --config ./.golangci.yml
+          working-directory: backend
+          version: latest
+      - name: Build binary
+        run: go build .
+  golangci:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v2
+        with:
+          only-new-issues: true
