@@ -7,7 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  go-essentials:
+  format:
+    name: format go files
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -16,20 +17,21 @@ jobs:
         with:
           gofmt-path: '.'
           gofmt-flags: '-l -d'
+  linter:
+    name: lint go files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
       - name: Run linter
         uses: golangci/golangci-lint-action@v2
         with:
           args: --config ./.golangci.yml
           working-directory: backend
           version: latest
-      - name: Build binary
-        run: go build .
-  golangci:
-    name: lint
+  build:
+    name: build binary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v2
-        with:
-          only-new-issues: true
+      - name: Build binary
+        run: go build .
