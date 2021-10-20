@@ -22,7 +22,7 @@ func Middleware() gin.HandlerFunc {
 		if len(ids) < 2 {
 			return
 		}
-		c.Set(highlight.ContextKeys.SessionID, ids[0])
+		c.Set(highlight.ContextKeys.SessionSecureID, ids[0])
 		c.Set(highlight.ContextKeys.RequestID, ids[1])
 	}
 }
