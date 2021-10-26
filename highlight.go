@@ -62,14 +62,49 @@ var (
 // Requester is used for making graphql requests
 // in testing, a mock requester with an overwritten trigger function may be used
 type Requester interface {
-	trigger([]*BackendErrorObjectInput)
+	trigger([]*BackendErrorObjectInput) error
 }
-
-type graphqlRequester struct{}
 
 var (
 	requester Requester
 )
+
+type graphqlRequester struct{}
+
+func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput) error {
+	if len(errorsInput) < 1 {
+		return nil
+	}
+	var mutation struct {
+		PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
+	}
+	variables := map[string]interface{}{
+		"errors": errorsInput,
+	}
+
+	err := client.Mutate(context.Background(), &mutation, variables)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type mockRequester struct{}
+
+func (m mockRequester) trigger(errorsInput []*BackendErrorObjectInput) error {
+	if len(errorsInput) < 1 {
+		return nil
+	}
+	var mutation struct {
+		PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
+	}
+	variables := map[string]interface{}{
+		"errors": errorsInput,
+	}
+	print(mutation)
+	print(variables)
+	return nil
+}
 
 type BackendErrorObjectInput struct {
 	SessionSecureID graphql.String  `json:"session_secure_id"`
@@ -220,23 +255,6 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	}
 	errorChan <- convertedError
 	return nil
-}
-
-func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput) {
-	if len(errorsInput) < 1 {
-		return
-	}
-	var mutation struct {
-		PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
-	}
-	variables := map[string]interface{}{
-		"errors": errorsInput,
-	}
-
-	err := client.Mutate(context.Background(), &mutation, variables)
-	if err != nil {
-		return
-	}
 }
 
 func shutdown() {
