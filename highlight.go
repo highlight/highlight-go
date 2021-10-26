@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hasura/go-graphql-client"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -214,12 +215,29 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	case error:
 		convertedError.Event = graphql.String(e.Error())
 		convertedError.StackTrace = graphql.String(e.Error())
+	case stackTracer:
+		stack := e.StackTrace()
+		if len(stack) < 1 {
+			return fmt.Errorf("no stack frames in stack trace for stackTracer errors")
+		}
+		if len(stack) < 2 {
+			convertedError.Event = graphql.String(fmt.Sprintf("%v", stack))
+			convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", stack))
+		} else {
+			convertedError.Event = graphql.String(fmt.Sprintf("%v", stack[0]))
+			convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", stack[1:]))
+		}
 	default:
 		convertedError.Event = graphql.String(fmt.Sprintf("%v", e))
 		convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", e))
 	}
 	errorChan <- convertedError
 	return nil
+}
+
+// stackTracer implements the errors.StackTrace() interface function
+type stackTracer interface {
+	StackTrace() errors.StackTrace
 }
 
 func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput) {
