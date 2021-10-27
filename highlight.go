@@ -250,7 +250,11 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 			stackFrames = append(stackFrames, string(frameBytes))
 		}
 		convertedError.Event = graphql.String(fmt.Sprintf("%v", e.Error()))
-		convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", stackFrames))
+		stackFramesBytes, err := json.Marshal(stackFrames)
+		if err != nil {
+			return err
+		}
+		convertedError.StackTrace = graphql.String(stackFramesBytes)
 	case error:
 		convertedError.Event = graphql.String(e.Error())
 		convertedError.StackTrace = graphql.String(e.Error())
