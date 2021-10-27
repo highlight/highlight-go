@@ -59,6 +59,12 @@ var (
 	state appState // 0 is idle, 1 is started, 2 is stopped
 )
 
+const (
+	consumeErrorSessionIDMissing = "context does not contain highlightSessionSecureID; context must have injected values from highlight.InterceptRequest"
+	consumeErrorRequestIDMissing = "context does not contain highlightRequestID; context must have injected values from highlight.InterceptRequest"
+	consumeErrorWorkerStopped    = "highlight worker stopped"
+)
+
 // Requester is used for making graphql requests
 // in testing, a mock requester with an overwritten trigger function may be used
 type Requester interface {
@@ -92,17 +98,7 @@ func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput) error 
 type mockRequester struct{}
 
 func (m mockRequester) trigger(errorsInput []*BackendErrorObjectInput) error {
-	if len(errorsInput) < 1 {
-		return nil
-	}
-	var mutation struct {
-		PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
-	}
-	variables := map[string]interface{}{
-		"errors": errorsInput,
-	}
-	print(mutation)
-	print(variables)
+	// NOOP
 	return nil
 }
 
@@ -149,19 +145,10 @@ func StartWithContext(ctx context.Context) {
 		for {
 			select {
 			case <-time.After(time.Duration(flushInterval) * time.Second):
-				time.Sleep(time.Duration(flushInterval) * time.Second)
 				wg.Add(1)
-				tempChanSize := len(errorChan)
-				var flushedErrors []*BackendErrorObjectInput
-				for i := 0; i < tempChanSize; i++ {
-					e := <-errorChan
-					if e == (BackendErrorObjectInput{}) {
-						continue
-					}
-					flushedErrors = append(flushedErrors, &e)
-				}
+				flushedErrors := flush()
 				wg.Done()
-				requester.trigger(flushedErrors)
+				_ = requester.trigger(flushedErrors)
 			case <-interruptChan:
 				shutdown()
 				return
@@ -219,18 +206,18 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) error {
 	if state == stopped {
-		return fmt.Errorf("highlight worker stopped")
+		return fmt.Errorf(consumeErrorWorkerStopped)
 	}
 	defer wg.Done()
 	wg.Add(1)
 	timestamp := time.Now()
 	sessionSecureID := ctx.Value(ContextKeys.SessionSecureID)
 	if sessionSecureID == nil {
-		return fmt.Errorf("context does not contain highlightSessionSecureID; context must have injected values from highlight.InterceptRequest")
+		return fmt.Errorf(consumeErrorSessionIDMissing)
 	}
 	requestID := ctx.Value(ContextKeys.RequestID)
 	if requestID == nil {
-		return fmt.Errorf("context does not contain highlightRequestID; context must have injected values from highlight.InterceptRequest")
+		return fmt.Errorf(consumeErrorRequestIDMissing)
 	}
 
 	tagsBytes, err := json.Marshal(tags)
@@ -245,6 +232,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 		Timestamp:       timestamp,
 		Payload:         (*graphql.String)(&tagsString),
 	}
+
 	switch e := errorInput.(type) {
 	case error:
 		convertedError.Event = graphql.String(e.Error())
@@ -255,6 +243,19 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	}
 	errorChan <- convertedError
 	return nil
+}
+
+func flush() []*BackendErrorObjectInput {
+	tempChanSize := len(errorChan)
+	var flushedErrors []*BackendErrorObjectInput
+	for i := 0; i < tempChanSize; i++ {
+		e := <-errorChan
+		if e == (BackendErrorObjectInput{}) {
+			continue
+		}
+		flushedErrors = append(flushedErrors, &e)
+	}
+	return flushedErrors
 }
 
 func shutdown() {
