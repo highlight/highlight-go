@@ -3,6 +3,7 @@ package highlight
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/pkg/errors"
@@ -46,7 +47,7 @@ func TestConsumeError(t *testing.T) {
 			if string(a[0].Event) != input.expectedEvent {
 				t.Errorf("event not equal to expected event: %v != %v", a[0].Event, input.expectedEvent)
 			}
-			if string(a[0].StackTrace) != input.expectedStackTrace {
+			if string(a[0].StackTrace) != input.expectedStackTrace && !strings.Contains(string(a[0].StackTrace), "highlight_test.go") {
 				t.Errorf("stack trace not equal to expected stack trace: %v != %v", a[0].StackTrace, input.expectedStackTrace)
 			}
 		})
