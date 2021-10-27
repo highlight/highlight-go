@@ -99,6 +99,7 @@ type mockRequester struct{}
 
 func (m mockRequester) trigger(errorsInput []*BackendErrorObjectInput) error {
 	// NOOP
+	_ = errorsInput
 	return nil
 }
 
