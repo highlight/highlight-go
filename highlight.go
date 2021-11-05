@@ -66,6 +66,23 @@ const (
 	consumeErrorWorkerStopped    = "highlight worker stopped"
 )
 
+// Logger is an interface that implements Log and Logf
+type Logger interface {
+	Error(v ...interface{})
+	Errorf(format string, v ...interface{})
+}
+
+// log is this packages logger
+var logger struct {
+	Logger
+}
+
+// noop default logger
+type deadLog struct{}
+
+func (d deadLog) Error(v ...interface{})                 {}
+func (d deadLog) Errorf(format string, v ...interface{}) {}
+
 // Requester is used for making graphql requests
 // in testing, a mock requester with an overwritten trigger function may be used
 type Requester interface {
@@ -125,6 +142,7 @@ func init() {
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
 	SetFlushInterval(10)
+	SetDebugMode(deadLog{})
 
 	requester = graphqlRequester{}
 }
@@ -184,6 +202,10 @@ func SetFlushInterval(newFlushInterval int) {
 // in case you are running Highlight on-prem, and need to point to your on-prem instance.
 func SetGraphqlClientAddress(newGraphqlClientAddress string) {
 	graphqlClientAddress = newGraphqlClientAddress
+}
+
+func SetDebugMode(l Logger) {
+	logger.Logger = l
 }
 
 // InterceptRequest calls InterceptRequestWithContext using the request object's context
