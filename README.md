@@ -60,9 +60,9 @@ Finally, it's time to consume errors. Add the following line to your error handl
 func someEndpoint() {
 	err := someFuntionCall()
 	if err != nil {
-		_ = highlight.ConsumeError(err)
+		highlight.ConsumeError(err)
 		// including optional tags:
-		_ = highlight.ConsumeError(err, "environment:dev", "important")
+		highlight.ConsumeError(err, "environment:dev", "important")
 	}
 }
 ```
