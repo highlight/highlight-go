@@ -240,16 +240,19 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	if sessionSecureID == nil {
 		err := errors.New(consumeErrorSessionIDMissing)
 		logger.Errorf("[highlight-go] %v", err)
+		return
 	}
 	requestID := ctx.Value(ContextKeys.RequestID)
 	if requestID == nil {
 		err := errors.New(consumeErrorRequestIDMissing)
 		logger.Errorf("[highlight-go] %v", err)
+		return
 	}
 
 	tagsBytes, err := json.Marshal(tags)
 	if err != nil {
 		logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling tags"))
+		return
 	}
 	tagsString := string(tagsBytes)
 	convertedError := BackendErrorObjectInput{
@@ -272,6 +275,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 			frameBytes, err := frame.MarshalText()
 			if err != nil {
 				logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling frame text"))
+				return
 			}
 			stackFrames = append(stackFrames, string(frameBytes))
 		}
@@ -279,6 +283,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 		stackFramesBytes, err := json.Marshal(stackFrames)
 		if err != nil {
 			logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling stack frames"))
+			return
 		}
 		convertedError.StackTrace = graphql.String(stackFramesBytes)
 	case error:
