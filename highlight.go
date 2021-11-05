@@ -228,11 +228,10 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 
 // ConsumeError adds an error to the queue of errors to be sent to our backend.
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
-func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) error {
+func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	if state == stopped {
 		err := errors.New(consumeErrorWorkerStopped)
 		logger.Errorf("[highlight-go] %v", err)
-		return err
 	}
 	defer wg.Done()
 	wg.Add(1)
@@ -241,19 +240,16 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	if sessionSecureID == nil {
 		err := errors.New(consumeErrorSessionIDMissing)
 		logger.Errorf("[highlight-go] %v", err)
-		return err
 	}
 	requestID := ctx.Value(ContextKeys.RequestID)
 	if requestID == nil {
 		err := errors.New(consumeErrorRequestIDMissing)
 		logger.Errorf("[highlight-go] %v", err)
-		return err
 	}
 
 	tagsBytes, err := json.Marshal(tags)
 	if err != nil {
 		logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling tags"))
-		return err
 	}
 	tagsString := string(tagsBytes)
 	convertedError := BackendErrorObjectInput{
@@ -270,14 +266,12 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 		if len(stack) < 1 {
 			err := errors.New("no stack frames in stack trace for stackTracer errors")
 			logger.Errorf("[highlight-go] %v", err)
-			return err
 		}
 		var stackFrames []string
 		for _, frame := range stack {
 			frameBytes, err := frame.MarshalText()
 			if err != nil {
 				logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling frame text"))
-				return err
 			}
 			stackFrames = append(stackFrames, string(frameBytes))
 		}
@@ -285,7 +279,6 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 		stackFramesBytes, err := json.Marshal(stackFrames)
 		if err != nil {
 			logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling stack frames"))
-			return err
 		}
 		convertedError.StackTrace = graphql.String(stackFramesBytes)
 	case error:
@@ -296,7 +289,6 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 		convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", e))
 	}
 	errorChan <- convertedError
-	return nil
 }
 
 // stackTracer implements the errors.StackTrace() interface function
