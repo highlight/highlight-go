@@ -66,6 +66,23 @@ const (
 	consumeErrorWorkerStopped    = "highlight worker stopped"
 )
 
+// Logger is an interface that implements Log and Logf
+type Logger interface {
+	Error(v ...interface{})
+	Errorf(format string, v ...interface{})
+}
+
+// log is this packages logger
+var logger struct {
+	Logger
+}
+
+// noop default logger
+type deadLog struct{}
+
+func (d deadLog) Error(v ...interface{})                 {}
+func (d deadLog) Errorf(format string, v ...interface{}) {}
+
 // Requester is used for making graphql requests
 // in testing, a mock requester with an overwritten trigger function may be used
 type Requester interface {
@@ -125,6 +142,7 @@ func init() {
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
 	SetFlushInterval(10)
+	SetDebugMode(deadLog{})
 
 	requester = graphqlRequester{}
 }
@@ -186,6 +204,10 @@ func SetGraphqlClientAddress(newGraphqlClientAddress string) {
 	graphqlClientAddress = newGraphqlClientAddress
 }
 
+func SetDebugMode(l Logger) {
+	logger.Logger = l
+}
+
 // InterceptRequest calls InterceptRequestWithContext using the request object's context
 func InterceptRequest(r *http.Request) context.Context {
 	return InterceptRequestWithContext(r.Context(), r)
@@ -206,25 +228,31 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 
 // ConsumeError adds an error to the queue of errors to be sent to our backend.
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
-func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) error {
+func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	if state == stopped {
-		return fmt.Errorf(consumeErrorWorkerStopped)
+		err := errors.New(consumeErrorWorkerStopped)
+		logger.Errorf("[highlight-go] %v", err)
 	}
 	defer wg.Done()
 	wg.Add(1)
 	timestamp := time.Now()
 	sessionSecureID := ctx.Value(ContextKeys.SessionSecureID)
 	if sessionSecureID == nil {
-		return fmt.Errorf(consumeErrorSessionIDMissing)
+		err := errors.New(consumeErrorSessionIDMissing)
+		logger.Errorf("[highlight-go] %v", err)
+		return
 	}
 	requestID := ctx.Value(ContextKeys.RequestID)
 	if requestID == nil {
-		return fmt.Errorf(consumeErrorRequestIDMissing)
+		err := errors.New(consumeErrorRequestIDMissing)
+		logger.Errorf("[highlight-go] %v", err)
+		return
 	}
 
 	tagsBytes, err := json.Marshal(tags)
 	if err != nil {
-		return err
+		logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling tags"))
+		return
 	}
 	tagsString := string(tagsBytes)
 	convertedError := BackendErrorObjectInput{
@@ -239,20 +267,23 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 	case stackTracer:
 		stack := e.StackTrace()
 		if len(stack) < 1 {
-			return fmt.Errorf("no stack frames in stack trace for stackTracer errors")
+			err := errors.New("no stack frames in stack trace for stackTracer errors")
+			logger.Errorf("[highlight-go] %v", err)
 		}
 		var stackFrames []string
 		for _, frame := range stack {
 			frameBytes, err := frame.MarshalText()
 			if err != nil {
-				return err
+				logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling frame text"))
+				return
 			}
 			stackFrames = append(stackFrames, string(frameBytes))
 		}
 		convertedError.Event = graphql.String(fmt.Sprintf("%v", e.Error()))
 		stackFramesBytes, err := json.Marshal(stackFrames)
 		if err != nil {
-			return err
+			logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling stack frames"))
+			return
 		}
 		convertedError.StackTrace = graphql.String(stackFramesBytes)
 	case error:
@@ -263,7 +294,6 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) e
 		convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", e))
 	}
 	errorChan <- convertedError
-	return nil
 }
 
 // stackTracer implements the errors.StackTrace() interface function
