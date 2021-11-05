@@ -19,29 +19,27 @@ func TestConsumeError(t *testing.T) {
 		errorInput         interface{}
 		contextInput       context.Context
 		tags               []string
+		expectedFlushSize  int
 		expectedEvent      string
 		expectedStackTrace string
 		expectedError      error
 	}{
-		"test builtin error":                                {contextInput: ctx, errorInput: fmt.Errorf("error here"), expectedEvent: "error here", expectedStackTrace: "error here"},
-		"test builtin error with invalid context":           {contextInput: context.Background(), errorInput: fmt.Errorf("error here"), expectedError: fmt.Errorf(consumeErrorSessionIDMissing)},
-		"test simple github.com/pkg/errors error":           {contextInput: ctx, errorInput: errors.New("error here"), expectedEvent: "error here", expectedStackTrace: `["github.com/highlight-run/highlight-go.TestConsumeError /Users/cameronbrill/Projects/work/Highlight/highlight-go/highlight_test.go:27","testing.tRunner /usr/local/opt/go/libexec/src/testing/testing.go:1259","runtime.goexit /usr/local/opt/go/libexec/src/runtime/asm_amd64.s:1581"]`},
-		"test github.com/pkg/errors error with stack trace": {contextInput: ctx, errorInput: errors.Wrap(errors.New("error here"), "error there"), expectedEvent: "error there: error here", expectedStackTrace: `["github.com/highlight-run/highlight-go.TestConsumeError /Users/cameronbrill/Projects/work/Highlight/highlight-go/highlight_test.go:28","testing.tRunner /usr/local/opt/go/libexec/src/testing/testing.go:1259","runtime.goexit /usr/local/opt/go/libexec/src/runtime/asm_amd64.s:1581"]`},
+		"test builtin error":                                {expectedFlushSize: 1, contextInput: ctx, errorInput: fmt.Errorf("error here"), expectedEvent: "error here", expectedStackTrace: "error here"},
+		"test builtin error with invalid context":           {expectedFlushSize: 0, contextInput: context.Background(), errorInput: fmt.Errorf("error here"), expectedError: fmt.Errorf(consumeErrorSessionIDMissing)},
+		"test simple github.com/pkg/errors error":           {expectedFlushSize: 1, contextInput: ctx, errorInput: errors.New("error here"), expectedEvent: "error here", expectedStackTrace: `["github.com/highlight-run/highlight-go.TestConsumeError /Users/cameronbrill/Projects/work/Highlight/highlight-go/highlight_test.go:27","testing.tRunner /usr/local/opt/go/libexec/src/testing/testing.go:1259","runtime.goexit /usr/local/opt/go/libexec/src/runtime/asm_amd64.s:1581"]`},
+		"test github.com/pkg/errors error with stack trace": {expectedFlushSize: 1, contextInput: ctx, errorInput: errors.Wrap(errors.New("error here"), "error there"), expectedEvent: "error there: error here", expectedStackTrace: `["github.com/highlight-run/highlight-go.TestConsumeError /Users/cameronbrill/Projects/work/Highlight/highlight-go/highlight_test.go:28","testing.tRunner /usr/local/opt/go/libexec/src/testing/testing.go:1259","runtime.goexit /usr/local/opt/go/libexec/src/runtime/asm_amd64.s:1581"]`},
 	}
 
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {
 			Start()
-			err := ConsumeError(input.contextInput, input.errorInput, input.tags...)
-			if err != nil {
-				if input.expectedError == nil || err.Error() != input.expectedError.Error() {
-					t.Errorf("received error not equal to expected error: %v != %v", err, input.expectedError)
-				}
+			ConsumeError(input.contextInput, input.errorInput, input.tags...)
+			a := flush()
+			if len(a) != input.expectedFlushSize {
+				t.Errorf("flush returned the wrong number of errors [%v != %v]", len(a), input.expectedFlushSize)
 				return
 			}
-			a := flush()
-			if len(a) != 1 {
-				t.Errorf("flush returned the wrong number of errors")
+			if len(a) < 1 {
 				return
 			}
 			if string(a[0].Event) != input.expectedEvent {
