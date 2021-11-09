@@ -235,7 +235,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	}
 	defer wg.Done()
 	wg.Add(1)
-	timestamp := time.Now()
+	timestamp := time.Now().UTC()
 	sessionSecureID := ctx.Value(ContextKeys.SessionSecureID)
 	if sessionSecureID == nil {
 		err := errors.New(consumeErrorSessionIDMissing)
