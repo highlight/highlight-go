@@ -252,7 +252,6 @@ func MarkBackendSetup(ctx context.Context) {
 			}
 		}
 	}
-	return
 }
 
 // ConsumeError adds an error to the queue of errors to be sent to our backend.
