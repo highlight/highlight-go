@@ -60,6 +60,12 @@ var (
 	state appState // 0 is idle, 1 is started, 2 is stopped
 )
 
+const backendSetupCooldown = 15
+
+var (
+	lastBackendSetupTimestamp time.Time
+)
+
 const (
 	consumeErrorSessionIDMissing = "context does not contain highlightSessionSecureID; context must have injected values from highlight.InterceptRequest"
 	consumeErrorRequestIDMissing = "context does not contain highlightRequestID; context must have injected values from highlight.InterceptRequest"
@@ -224,6 +230,28 @@ func InterceptRequestWithContext(ctx context.Context, r *http.Request) context.C
 	ctx = context.WithValue(ctx, ContextKeys.SessionSecureID, ids[0])
 	ctx = context.WithValue(ctx, ContextKeys.RequestID, ids[1])
 	return ctx
+}
+
+func MarkBackendSetup(ctx context.Context) {
+	if lastBackendSetupTimestamp.IsZero() {
+		currentTime := time.Now()
+		if currentTime.Sub(lastBackendSetupTimestamp).Minutes() > backendSetupCooldown {
+			lastBackendSetupTimestamp = currentTime
+			var mutation struct {
+				MarkBackendSetup string `graphql:"markBackendSetup(session_secure_id: $session_secure_id)"`
+			}
+			sessionSecureID := ctx.Value(ContextKeys.SessionSecureID)
+			variables := map[string]interface{}{
+				"session_secure_id": graphql.String(fmt.Sprintf("%v", sessionSecureID)),
+			}
+
+			err := client.Mutate(context.Background(), &mutation, variables)
+			if err != nil {
+				logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marking backend setup"))
+				return
+			}
+		}
+	}
 }
 
 // ConsumeError adds an error to the queue of errors to be sent to our backend.

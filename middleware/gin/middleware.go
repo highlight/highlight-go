@@ -24,5 +24,6 @@ func Middleware() gin.HandlerFunc {
 		}
 		c.Set(string(highlight.ContextKeys.SessionSecureID), ids[0])
 		c.Set(string(highlight.ContextKeys.RequestID), ids[1])
+		highlight.MarkBackendSetup(c)
 	}
 }
