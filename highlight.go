@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +25,7 @@ var (
 	signalChan           chan os.Signal
 	wg                   sync.WaitGroup
 	graphqlClientAddress string
+	sr                   sourceReader
 )
 
 // contextKey represents the keys that highlight may store in the users' context
@@ -61,6 +63,8 @@ var (
 )
 
 const backendSetupCooldown = 15
+
+const contextLines = 5
 
 var (
 	lastBackendSetupTimestamp time.Time
@@ -144,6 +148,7 @@ func init() {
 	errorChan = make(chan BackendErrorObjectInput, 128)
 	interruptChan = make(chan bool, 1)
 	signalChan = make(chan os.Signal, 1)
+	sr = newSourceReader()
 
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
@@ -254,6 +259,21 @@ func MarkBackendSetup(ctx context.Context) {
 	}
 }
 
+func getFileNameAndLineNumber(s string) (string, int) {
+	splitSpace := strings.Fields(s)
+	if len(splitSpace) == 2 {
+		splitData := strings.Split(splitSpace[1], ":")
+		if len(splitData) == 2 {
+			lineNumber, err := strconv.Atoi(splitData[1])
+			if err != nil {
+				return "", 0
+			}
+			return splitData[0], lineNumber
+		}
+	}
+	return "", 0
+}
+
 // ConsumeError adds an error to the queue of errors to be sent to our backend.
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
@@ -300,6 +320,19 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 		}
 		var stackFrames []string
 		for _, frame := range stack {
+			frame := FrameWithContext{
+				Frame: frame,
+			}
+			initialFrame, err := frame.MarshalText()
+			if err != nil {
+				logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling stack frames"))
+				return
+			}
+			frameFileName, frameLineNumber := getFileNameAndLineNumber(string(initialFrame))
+			if frameFileName != "" && frameLineNumber != 0 {
+				lines, contextLine := sr.readContextLines(frameFileName, frameLineNumber, contextLines)
+				frame = sr.addContextLinesToFrame(frame, lines, contextLine)
+			}
 			frameBytes, err := frame.MarshalText()
 			if err != nil {
 				logger.Errorf("[highlight-go] %v", errors.Wrap(err, "error marshaling frame text"))
