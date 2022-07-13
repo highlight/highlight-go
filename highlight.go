@@ -58,7 +58,8 @@ const (
 )
 
 var (
-	state appState // 0 is idle, 1 is started, 2 is stopped
+	state      appState // 0 is idle, 1 is started, 2 is stopped
+	stateMutex sync.Mutex
 )
 
 const backendSetupCooldown = 15
@@ -178,6 +179,8 @@ func Start() {
 // service, but allows the user to pass in their own context.Context.
 // This allows the user kill the highlight worker by canceling their context.CancelFunc.
 func StartWithContext(ctx context.Context) {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
 	if state == started {
 		return
 	}
@@ -207,6 +210,8 @@ func StartWithContext(ctx context.Context) {
 
 // Stop sends an interrupt signal to the main process, closing the channels and returning the goroutines.
 func Stop() {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
 	if state == stopped || state == idle {
 		return
 	}
@@ -396,6 +401,8 @@ func flush() ([]*BackendErrorObjectInput, []*BackendMetricInput) {
 }
 
 func shutdown() {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
 	if state == stopped || state == idle {
 		return
 	}
