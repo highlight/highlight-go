@@ -34,7 +34,7 @@ func TestConsumeError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			Start()
 			ConsumeError(input.contextInput, input.errorInput, input.tags...)
-			a := flush()
+			a, _ := flush()
 			if len(a) != input.expectedFlushSize {
 				t.Errorf("flush returned the wrong number of errors [%v != %v]", len(a), input.expectedFlushSize)
 				return
@@ -48,6 +48,49 @@ func TestConsumeError(t *testing.T) {
 			// strings.Contains() is here because the actual stack trace will differ from machine to machine, because file paths are different.
 			if string(a[0].StackTrace) != input.expectedStackTrace && !strings.Contains(string(a[0].StackTrace), "highlight_test.go") {
 				t.Errorf("stack trace not equal to expected stack trace: %v != %v", a[0].StackTrace, input.expectedStackTrace)
+			}
+		})
+	}
+	Stop()
+}
+
+// TestConsumeError tests every case for RecordMetric
+func TestRecordMetric(t *testing.T) {
+	requester = mockRequester{}
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, ContextKeys.SessionSecureID, "0")
+	ctx = context.WithValue(ctx, ContextKeys.RequestID, "0")
+	tests := map[string]struct {
+		metricInput struct {
+			name  string
+			value float64
+		}
+		contextInput      context.Context
+		expectedFlushSize int
+	}{
+		"test": {expectedFlushSize: 1, contextInput: ctx, metricInput: struct {
+			name  string
+			value float64
+		}{name: "myMetric", value: 123.456}},
+	}
+
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			Start()
+			RecordMetric(input.contextInput, input.metricInput.name, input.metricInput.value)
+			_, a := flush()
+			if len(a) != input.expectedFlushSize {
+				t.Errorf("flush returned the wrong number of errors [%v != %v]", len(a), input.expectedFlushSize)
+				return
+			}
+			if len(a) < 1 {
+				return
+			}
+			if string(a[0].Name) != input.metricInput.name {
+				t.Errorf("name not equal to expected name: %v != %v", a[0].Name, input.metricInput.name)
+			}
+			if float64(a[0].Value) != input.metricInput.value {
+				t.Errorf("name not equal to expected name: %v != %v", a[0].Value, input.metricInput.value)
 			}
 		})
 	}
