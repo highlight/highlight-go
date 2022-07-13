@@ -334,6 +334,11 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	errorChan <- convertedError
 }
 
+// RecordMetric is used to record arbitrary metrics in your golang backend.
+// Highlight will process these metrics in the context of your session and expose them
+// through dashboards. For example, you may want to record the latency of a DB query
+// as a metric that you would like to graph and monitor. You'll be able to view the metric
+// in the context of the session and network request and recorded it.
 func RecordMetric(ctx context.Context, name string, value float64) {
 	sessionSecureID, requestID, err := validateRequest(ctx)
 	if err != nil {
