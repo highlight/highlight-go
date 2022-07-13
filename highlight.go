@@ -401,7 +401,4 @@ func shutdown() {
 	}
 	state = stopped
 	wg.Wait()
-	close(errorChan)
-	close(interruptChan)
-	close(signalChan)
 }
