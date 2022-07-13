@@ -18,7 +18,7 @@ import (
 
 var (
 	errorChan            chan BackendErrorObjectInput
-	metricChan           chan BackendMetricInput
+	metricChan           chan MetricInput
 	flushInterval        int
 	client               *graphql.Client
 	interruptChan        chan bool
@@ -96,7 +96,7 @@ func (d deadLog) Errorf(format string, v ...interface{}) {}
 // Requester is used for making graphql requests
 // in testing, a mock requester with an overwritten trigger function may be used
 type Requester interface {
-	trigger([]*BackendErrorObjectInput, []*BackendMetricInput) error
+	trigger([]*BackendErrorObjectInput, []*MetricInput) error
 }
 
 var (
@@ -105,29 +105,45 @@ var (
 
 type graphqlRequester struct{}
 
-func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput, metricsInputs []*BackendMetricInput) error {
-	if len(errorsInput) < 1 && len(metricsInputs) < 1 {
-		return nil
-	}
-	var mutation struct {
-		PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
-		PushMetrics        string `graphql:"pushMetrics(metrics: $metrics)"`
-	}
-	variables := map[string]interface{}{
-		"errors":  errorsInput,
-		"metrics": metricsInputs,
-	}
-
-	err := client.Mutate(context.Background(), &mutation, variables)
-	if err != nil {
-		return err
+func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput, metricsInputs []*MetricInput) error {
+	if len(errorsInput) > 0 && len(metricsInputs) > 0 {
+		var mutation struct {
+			PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
+			PushMetrics        string `graphql:"pushMetrics(metrics: $metrics)"`
+		}
+		variables := map[string]interface{}{
+			"errors":  errorsInput,
+			"metrics": metricsInputs,
+		}
+		err := client.Mutate(context.Background(), &mutation, variables)
+		if err != nil {
+			return err
+		}
+	} else if len(errorsInput) > 0 {
+		var mutation struct {
+			PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
+		}
+		variables := map[string]interface{}{"errors": errorsInput}
+		err := client.Mutate(context.Background(), &mutation, variables)
+		if err != nil {
+			return err
+		}
+	} else if len(metricsInputs) > 0 {
+		var mutation struct {
+			PushMetrics string `graphql:"pushMetrics(metrics: $metrics)"`
+		}
+		variables := map[string]interface{}{"metrics": metricsInputs}
+		err := client.Mutate(context.Background(), &mutation, variables)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 type mockRequester struct{}
 
-func (m mockRequester) trigger(errorsInput []*BackendErrorObjectInput, metricsInput []*BackendMetricInput) error {
+func (m mockRequester) trigger(errorsInput []*BackendErrorObjectInput, metricsInput []*MetricInput) error {
 	// NOOP
 	_ = errorsInput
 	_ = metricsInput
@@ -146,7 +162,7 @@ type BackendErrorObjectInput struct {
 	Payload         *graphql.String `json:"payload"`
 }
 
-type BackendMetricInput struct {
+type MetricInput struct {
 	SessionSecureID graphql.String  `json:"session_secure_id"`
 	Group           *graphql.String `json:"group"`
 	Name            graphql.String  `json:"name"`
@@ -158,7 +174,7 @@ type BackendMetricInput struct {
 // init gets called once when you import the package
 func init() {
 	errorChan = make(chan BackendErrorObjectInput, messageBufferSize)
-	metricChan = make(chan BackendMetricInput, messageBufferSize)
+	metricChan = make(chan MetricInput, messageBufferSize)
 	interruptChan = make(chan bool, 1)
 	signalChan = make(chan os.Signal, 1)
 
@@ -350,7 +366,7 @@ func RecordMetric(ctx context.Context, name string, value float64) {
 
 	req := graphql.String(requestID)
 	cat := graphql.String(metricCategory)
-	metric := BackendMetricInput{
+	metric := MetricInput{
 		SessionSecureID: graphql.String(sessionSecureID),
 		Group:           &req,
 		Name:            graphql.String(name),
@@ -389,7 +405,7 @@ type stackTracer interface {
 	Error() string
 }
 
-func flush() ([]*BackendErrorObjectInput, []*BackendMetricInput) {
+func flush() ([]*BackendErrorObjectInput, []*MetricInput) {
 	tempChanSize := len(errorChan)
 	var flushedErrors []*BackendErrorObjectInput
 	for i := 0; i < tempChanSize; i++ {
@@ -397,7 +413,7 @@ func flush() ([]*BackendErrorObjectInput, []*BackendMetricInput) {
 		flushedErrors = append(flushedErrors, &e)
 	}
 	tempChanSize = len(metricChan)
-	var flushedMetrics []*BackendMetricInput
+	var flushedMetrics []*MetricInput
 	for i := 0; i < tempChanSize; i++ {
 		e := <-metricChan
 		flushedMetrics = append(flushedMetrics, &e)
