@@ -18,6 +18,7 @@ import (
 
 var (
 	errorChan            chan BackendErrorObjectInput
+	metricChan           chan MetricInput
 	flushInterval        int
 	client               *graphql.Client
 	interruptChan        chan bool
@@ -57,10 +58,13 @@ const (
 )
 
 var (
-	state appState // 0 is idle, 1 is started, 2 is stopped
+	state      appState // 0 is idle, 1 is started, 2 is stopped
+	stateMutex sync.Mutex
 )
 
 const backendSetupCooldown = 15
+const messageBufferSize = 1024
+const metricCategory = "BACKEND"
 
 var (
 	lastBackendSetupTimestamp time.Time
@@ -92,7 +96,7 @@ func (d deadLog) Errorf(format string, v ...interface{}) {}
 // Requester is used for making graphql requests
 // in testing, a mock requester with an overwritten trigger function may be used
 type Requester interface {
-	trigger([]*BackendErrorObjectInput) error
+	trigger([]*BackendErrorObjectInput, []*MetricInput) error
 }
 
 var (
@@ -101,29 +105,48 @@ var (
 
 type graphqlRequester struct{}
 
-func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput) error {
-	if len(errorsInput) < 1 {
-		return nil
-	}
-	var mutation struct {
-		PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
-	}
-	variables := map[string]interface{}{
-		"errors": errorsInput,
-	}
-
-	err := client.Mutate(context.Background(), &mutation, variables)
-	if err != nil {
-		return err
+func (g graphqlRequester) trigger(errorsInput []*BackendErrorObjectInput, metricsInputs []*MetricInput) error {
+	if len(errorsInput) > 0 && len(metricsInputs) > 0 {
+		var mutation struct {
+			PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
+			PushMetrics        string `graphql:"pushMetrics(metrics: $metrics)"`
+		}
+		variables := map[string]interface{}{
+			"errors":  errorsInput,
+			"metrics": metricsInputs,
+		}
+		err := client.Mutate(context.Background(), &mutation, variables)
+		if err != nil {
+			return err
+		}
+	} else if len(errorsInput) > 0 {
+		var mutation struct {
+			PushBackendPayload string `graphql:"pushBackendPayload(errors: $errors)"`
+		}
+		variables := map[string]interface{}{"errors": errorsInput}
+		err := client.Mutate(context.Background(), &mutation, variables)
+		if err != nil {
+			return err
+		}
+	} else if len(metricsInputs) > 0 {
+		var mutation struct {
+			PushMetrics string `graphql:"pushMetrics(metrics: $metrics)"`
+		}
+		variables := map[string]interface{}{"metrics": metricsInputs}
+		err := client.Mutate(context.Background(), &mutation, variables)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 type mockRequester struct{}
 
-func (m mockRequester) trigger(errorsInput []*BackendErrorObjectInput) error {
+func (m mockRequester) trigger(errorsInput []*BackendErrorObjectInput, metricsInput []*MetricInput) error {
 	// NOOP
 	_ = errorsInput
+	_ = metricsInput
 	return nil
 }
 
@@ -139,15 +162,25 @@ type BackendErrorObjectInput struct {
 	Payload         *graphql.String `json:"payload"`
 }
 
+type MetricInput struct {
+	SessionSecureID graphql.String  `json:"session_secure_id"`
+	Group           *graphql.String `json:"group"`
+	Name            graphql.String  `json:"name"`
+	Value           graphql.Float   `json:"value"`
+	Category        *graphql.String `json:"category"`
+	Timestamp       time.Time       `json:"timestamp"`
+}
+
 // init gets called once when you import the package
 func init() {
-	errorChan = make(chan BackendErrorObjectInput, 128)
+	errorChan = make(chan BackendErrorObjectInput, messageBufferSize)
+	metricChan = make(chan MetricInput, messageBufferSize)
 	interruptChan = make(chan bool, 1)
 	signalChan = make(chan os.Signal, 1)
 
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
-	SetFlushInterval(10)
+	SetFlushInterval(5)
 	SetDebugMode(deadLog{})
 
 	requester = graphqlRequester{}
@@ -162,6 +195,8 @@ func Start() {
 // service, but allows the user to pass in their own context.Context.
 // This allows the user kill the highlight worker by canceling their context.CancelFunc.
 func StartWithContext(ctx context.Context) {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
 	if state == started {
 		return
 	}
@@ -172,9 +207,9 @@ func StartWithContext(ctx context.Context) {
 			select {
 			case <-time.After(time.Duration(flushInterval) * time.Second):
 				wg.Add(1)
-				flushedErrors := flush()
+				flushedErrors, flushedMetrics := flush()
 				wg.Done()
-				_ = requester.trigger(flushedErrors)
+				_ = requester.trigger(flushedErrors, flushedMetrics)
 			case <-interruptChan:
 				shutdown()
 				return
@@ -191,6 +226,8 @@ func StartWithContext(ctx context.Context) {
 
 // Stop sends an interrupt signal to the main process, closing the channels and returning the goroutines.
 func Stop() {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
 	if state == stopped || state == idle {
 		return
 	}
@@ -257,25 +294,14 @@ func MarkBackendSetup(ctx context.Context) {
 // ConsumeError adds an error to the queue of errors to be sent to our backend.
 // the provided context must have the injected highlight keys from InterceptRequestWithContext.
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
-	if state == stopped {
-		err := errors.New(consumeErrorWorkerStopped)
-		logger.Errorf("[highlight-go] %v", err)
+	sessionSecureID, requestID, err := validateRequest(ctx)
+	if err != nil {
+		return
 	}
+
 	defer wg.Done()
 	wg.Add(1)
 	timestamp := time.Now().UTC()
-	sessionSecureID := ctx.Value(ContextKeys.SessionSecureID)
-	if sessionSecureID == nil {
-		err := errors.New(consumeErrorSessionIDMissing)
-		logger.Errorf("[highlight-go] %v", err)
-		return
-	}
-	requestID := ctx.Value(ContextKeys.RequestID)
-	if requestID == nil {
-		err := errors.New(consumeErrorRequestIDMissing)
-		logger.Errorf("[highlight-go] %v", err)
-		return
-	}
 
 	tagsBytes, err := json.Marshal(tags)
 	if err != nil {
@@ -286,7 +312,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	convertedError := BackendErrorObjectInput{
 		SessionSecureID: graphql.String(fmt.Sprintf("%v", sessionSecureID)),
 		RequestID:       graphql.String(fmt.Sprintf("%v", requestID)),
-		Type:            "BACKEND",
+		Type:            metricCategory,
 		Timestamp:       timestamp,
 		Payload:         (*graphql.String)(&tagsString),
 	}
@@ -324,32 +350,83 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	errorChan <- convertedError
 }
 
+// RecordMetric is used to record arbitrary metrics in your golang backend.
+// Highlight will process these metrics in the context of your session and expose them
+// through dashboards. For example, you may want to record the latency of a DB query
+// as a metric that you would like to graph and monitor. You'll be able to view the metric
+// in the context of the session and network request and recorded it.
+func RecordMetric(ctx context.Context, name string, value float64) {
+	sessionSecureID, requestID, err := validateRequest(ctx)
+	if err != nil {
+		return
+	}
+	// track invocation of this function to ensure shutdown waits
+	defer wg.Done()
+	wg.Add(1)
+
+	req := graphql.String(requestID)
+	cat := graphql.String(metricCategory)
+	metric := MetricInput{
+		SessionSecureID: graphql.String(sessionSecureID),
+		Group:           &req,
+		Name:            graphql.String(name),
+		Value:           graphql.Float(value),
+		Category:        &cat,
+		Timestamp:       time.Now().UTC(),
+	}
+	metricChan <- metric
+}
+
+func validateRequest(ctx context.Context) (sessionSecureID string, requestID string, err error) {
+	if state == stopped {
+		err := errors.New(consumeErrorWorkerStopped)
+		logger.Errorf("[highlight-go] %v", err)
+	}
+	if v := ctx.Value(ContextKeys.SessionSecureID); v != nil {
+		sessionSecureID = v.(string)
+	} else {
+		err = errors.New(consumeErrorSessionIDMissing)
+		logger.Errorf("[highlight-go] %v", err)
+		return
+	}
+	if v := ctx.Value(ContextKeys.RequestID); v != nil {
+		requestID = v.(string)
+	} else {
+		err = errors.New(consumeErrorRequestIDMissing)
+		logger.Errorf("[highlight-go] %v", err)
+		return
+	}
+	return
+}
+
 // stackTracer implements the errors.StackTrace() interface function
 type stackTracer interface {
 	StackTrace() errors.StackTrace
 	Error() string
 }
 
-func flush() []*BackendErrorObjectInput {
+func flush() ([]*BackendErrorObjectInput, []*MetricInput) {
 	tempChanSize := len(errorChan)
 	var flushedErrors []*BackendErrorObjectInput
 	for i := 0; i < tempChanSize; i++ {
 		e := <-errorChan
-		if e == (BackendErrorObjectInput{}) {
-			continue
-		}
 		flushedErrors = append(flushedErrors, &e)
 	}
-	return flushedErrors
+	tempChanSize = len(metricChan)
+	var flushedMetrics []*MetricInput
+	for i := 0; i < tempChanSize; i++ {
+		e := <-metricChan
+		flushedMetrics = append(flushedMetrics, &e)
+	}
+	return flushedErrors, flushedMetrics
 }
 
 func shutdown() {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
 	if state == stopped || state == idle {
 		return
 	}
 	state = stopped
 	wg.Wait()
-	close(errorChan)
-	close(interruptChan)
-	close(signalChan)
 }

@@ -3,6 +3,8 @@ package highlight
 import (
 	"context"
 	"fmt"
+	"github.com/99designs/gqlgen/graphql"
+	"github.com/vektah/gqlparser/v2/ast"
 	"strings"
 	"testing"
 
@@ -34,7 +36,7 @@ func TestConsumeError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			Start()
 			ConsumeError(input.contextInput, input.errorInput, input.tags...)
-			a := flush()
+			a, _ := flush()
 			if len(a) != input.expectedFlushSize {
 				t.Errorf("flush returned the wrong number of errors [%v != %v]", len(a), input.expectedFlushSize)
 				return
@@ -51,5 +53,86 @@ func TestConsumeError(t *testing.T) {
 			}
 		})
 	}
+	Stop()
+}
+
+// TestConsumeError tests every case for RecordMetric
+func TestRecordMetric(t *testing.T) {
+	requester = mockRequester{}
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, ContextKeys.SessionSecureID, "0")
+	ctx = context.WithValue(ctx, ContextKeys.RequestID, "0")
+	tests := map[string]struct {
+		metricInput struct {
+			name  string
+			value float64
+		}
+		contextInput      context.Context
+		expectedFlushSize int
+	}{
+		"test": {expectedFlushSize: 1, contextInput: ctx, metricInput: struct {
+			name  string
+			value float64
+		}{name: "myMetric", value: 123.456}},
+	}
+
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			Start()
+			RecordMetric(input.contextInput, input.metricInput.name, input.metricInput.value)
+			_, a := flush()
+			if len(a) != input.expectedFlushSize {
+				t.Errorf("flush returned the wrong number of metrics [%v != %v]", len(a), input.expectedFlushSize)
+				return
+			}
+			if len(a) < 1 {
+				return
+			}
+			if string(a[0].Name) != input.metricInput.name {
+				t.Errorf("name not equal to expected name: %v != %v", a[0].Name, input.metricInput.name)
+			}
+			if float64(a[0].Value) != input.metricInput.value {
+				t.Errorf("name not equal to expected name: %v != %v", a[0].Value, input.metricInput.value)
+			}
+		})
+	}
+	Stop()
+}
+
+func TestTracer(t *testing.T) {
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, ContextKeys.SessionSecureID, "0")
+	ctx = context.WithValue(ctx, ContextKeys.RequestID, "0")
+	ctx = graphql.WithOperationContext(ctx, &graphql.OperationContext{
+		Operation:     &ast.OperationDefinition{},
+		OperationName: "test-operation",
+		RawQuery:      "test-query",
+	})
+	ctx = graphql.WithFieldContext(ctx, &graphql.FieldContext{
+		Field: graphql.CollectedField{
+			Field: &ast.Field{Name: "test-field"},
+		},
+	})
+	tr := NewGraphqlTracer("test")
+	t.Run("test basic intercept", func(t *testing.T) {
+		Start()
+		if res := tr.InterceptResponse(ctx, func(ctx context.Context) *graphql.Response {
+			return graphql.ErrorResponse(ctx, "foo error")
+		}); res == nil {
+			t.Errorf("got invalid response from intercept response")
+		}
+		if field, err := tr.InterceptField(ctx, func(ctx context.Context) (res interface{}, err error) {
+			return &graphql.Response{}, nil
+		}); field == nil || err != nil {
+			t.Errorf("got invalid response from intercept field")
+		}
+
+		_, a := flush()
+		// size, duration, errorsCount, fields duration
+		if len(a) != 4 {
+			t.Errorf("flush returned the wrong number of metrics [%v != %v]", len(a), 4)
+			return
+		}
+	})
 	Stop()
 }
