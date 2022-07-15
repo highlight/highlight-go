@@ -59,7 +59,7 @@ const (
 
 var (
 	state      appState // 0 is idle, 1 is started, 2 is stopped
-	stateMutex sync.Mutex
+	stateMutex sync.RWMutex
 )
 
 const backendSetupCooldown = 15
@@ -229,8 +229,8 @@ func StartWithContext(ctx context.Context) {
 
 // Stop sends an interrupt signal to the main process, closing the channels and returning the goroutines.
 func Stop() {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	stateMutex.RLock()
+	defer stateMutex.RUnlock()
 	if state == stopped || state == idle {
 		return
 	}
@@ -391,6 +391,8 @@ func RecordMetric(ctx context.Context, name string, value float64) {
 }
 
 func validateRequest(ctx context.Context) (sessionSecureID string, requestID string, err error) {
+	stateMutex.RLock()
+	defer stateMutex.RUnlock()
 	if state == stopped {
 		err = errors.New(consumeErrorWorkerStopped)
 		return
