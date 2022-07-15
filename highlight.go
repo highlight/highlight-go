@@ -19,7 +19,7 @@ import (
 var (
 	errorChan            chan BackendErrorObjectInput
 	metricChan           chan MetricInput
-	flushInterval        int
+	flushInterval        time.Duration
 	client               *graphql.Client
 	interruptChan        chan bool
 	signalChan           chan os.Signal
@@ -63,7 +63,6 @@ var (
 )
 
 const backendSetupCooldown = 15
-const messageBufferSize = 1024
 const metricCategory = "BACKEND"
 
 var (
@@ -173,14 +172,16 @@ type MetricInput struct {
 
 // init gets called once when you import the package
 func init() {
-	errorChan = make(chan BackendErrorObjectInput, messageBufferSize)
-	metricChan = make(chan MetricInput, messageBufferSize)
+	// message channels should be unbuffered to avoid blocking request processing
+	// in case of a surge of metrics or errors.
+	errorChan = make(chan BackendErrorObjectInput)
+	metricChan = make(chan MetricInput)
 	interruptChan = make(chan bool, 1)
 	signalChan = make(chan os.Signal, 1)
 
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
-	SetFlushInterval(5)
+	SetFlushInterval(2 * time.Second)
 	SetDebugMode(deadLog{})
 
 	requester = graphqlRequester{}
@@ -205,7 +206,7 @@ func StartWithContext(ctx context.Context) {
 	go func() {
 		for {
 			select {
-			case <-time.After(time.Duration(flushInterval) * time.Second):
+			case <-time.After(flushInterval):
 				wg.Add(1)
 				flushedErrors, flushedMetrics := flush()
 				wg.Done()
@@ -237,7 +238,7 @@ func Stop() {
 // SetFlushInterval allows you to override the amount of time in which the
 // Highlight client will collect errors before sending them to our backend.
 // - newFlushInterval is an integer representing seconds
-func SetFlushInterval(newFlushInterval int) {
+func SetFlushInterval(newFlushInterval time.Duration) {
 	flushInterval = newFlushInterval
 }
 
@@ -296,6 +297,7 @@ func MarkBackendSetup(ctx context.Context) {
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	sessionSecureID, requestID, err := validateRequest(ctx)
 	if err != nil {
+		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 
@@ -358,6 +360,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 func RecordMetric(ctx context.Context, name string, value float64) {
 	sessionSecureID, requestID, err := validateRequest(ctx)
 	if err != nil {
+		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 	// track invocation of this function to ensure shutdown waits
@@ -379,21 +382,19 @@ func RecordMetric(ctx context.Context, name string, value float64) {
 
 func validateRequest(ctx context.Context) (sessionSecureID string, requestID string, err error) {
 	if state == stopped {
-		err := errors.New(consumeErrorWorkerStopped)
-		logger.Errorf("[highlight-go] %v", err)
+		err = errors.New(consumeErrorWorkerStopped)
+		return
 	}
 	if v := ctx.Value(ContextKeys.SessionSecureID); v != nil {
 		sessionSecureID = v.(string)
 	} else {
 		err = errors.New(consumeErrorSessionIDMissing)
-		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 	if v := ctx.Value(ContextKeys.RequestID); v != nil {
 		requestID = v.(string)
 	} else {
 		err = errors.New(consumeErrorRequestIDMissing)
-		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 	return
