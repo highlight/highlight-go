@@ -19,7 +19,7 @@ import (
 var (
 	errorChan            chan BackendErrorObjectInput
 	metricChan           chan MetricInput
-	flushInterval        int
+	flushInterval        time.Duration
 	client               *graphql.Client
 	interruptChan        chan bool
 	signalChan           chan os.Signal
@@ -59,11 +59,14 @@ const (
 
 var (
 	state      appState // 0 is idle, 1 is started, 2 is stopped
-	stateMutex sync.Mutex
+	stateMutex sync.RWMutex
 )
 
 const backendSetupCooldown = 15
-const messageBufferSize = 1024
+
+// message channels should be large to avoid blocking request processing
+// in case of a surge of metrics or errors.
+const messageBufferSize = 1 << 16
 const metricCategory = "BACKEND"
 
 var (
@@ -180,7 +183,7 @@ func init() {
 
 	signal.Notify(signalChan, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
 	SetGraphqlClientAddress("https://pub.highlight.run")
-	SetFlushInterval(5)
+	SetFlushInterval(2 * time.Second)
 	SetDebugMode(deadLog{})
 
 	requester = graphqlRequester{}
@@ -205,7 +208,7 @@ func StartWithContext(ctx context.Context) {
 	go func() {
 		for {
 			select {
-			case <-time.After(time.Duration(flushInterval) * time.Second):
+			case <-time.After(flushInterval):
 				wg.Add(1)
 				flushedErrors, flushedMetrics := flush()
 				wg.Done()
@@ -226,8 +229,8 @@ func StartWithContext(ctx context.Context) {
 
 // Stop sends an interrupt signal to the main process, closing the channels and returning the goroutines.
 func Stop() {
-	stateMutex.Lock()
-	defer stateMutex.Unlock()
+	stateMutex.RLock()
+	defer stateMutex.RUnlock()
 	if state == stopped || state == idle {
 		return
 	}
@@ -237,7 +240,7 @@ func Stop() {
 // SetFlushInterval allows you to override the amount of time in which the
 // Highlight client will collect errors before sending them to our backend.
 // - newFlushInterval is an integer representing seconds
-func SetFlushInterval(newFlushInterval int) {
+func SetFlushInterval(newFlushInterval time.Duration) {
 	flushInterval = newFlushInterval
 }
 
@@ -296,6 +299,7 @@ func MarkBackendSetup(ctx context.Context) {
 func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 	sessionSecureID, requestID, err := validateRequest(ctx)
 	if err != nil {
+		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 
@@ -347,7 +351,11 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 		convertedError.Event = graphql.String(fmt.Sprintf("%v", e))
 		convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", e))
 	}
-	errorChan <- convertedError
+	select {
+	case errorChan <- convertedError:
+	default:
+		logger.Errorf("[highlight-go] error channel full. discarding value for %s", sessionSecureID)
+	}
 }
 
 // RecordMetric is used to record arbitrary metrics in your golang backend.
@@ -358,6 +366,7 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 func RecordMetric(ctx context.Context, name string, value float64) {
 	sessionSecureID, requestID, err := validateRequest(ctx)
 	if err != nil {
+		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 	// track invocation of this function to ensure shutdown waits
@@ -374,26 +383,30 @@ func RecordMetric(ctx context.Context, name string, value float64) {
 		Category:        &cat,
 		Timestamp:       time.Now().UTC(),
 	}
-	metricChan <- metric
+	select {
+	case metricChan <- metric:
+	default:
+		logger.Errorf("[highlight-go] metric channel full. discarding value for %s", sessionSecureID)
+	}
 }
 
 func validateRequest(ctx context.Context) (sessionSecureID string, requestID string, err error) {
+	stateMutex.RLock()
+	defer stateMutex.RUnlock()
 	if state == stopped {
-		err := errors.New(consumeErrorWorkerStopped)
-		logger.Errorf("[highlight-go] %v", err)
+		err = errors.New(consumeErrorWorkerStopped)
+		return
 	}
 	if v := ctx.Value(ContextKeys.SessionSecureID); v != nil {
 		sessionSecureID = v.(string)
 	} else {
 		err = errors.New(consumeErrorSessionIDMissing)
-		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 	if v := ctx.Value(ContextKeys.RequestID); v != nil {
 		requestID = v.(string)
 	} else {
 		err = errors.New(consumeErrorRequestIDMissing)
-		logger.Errorf("[highlight-go] %v", err)
 		return
 	}
 	return
