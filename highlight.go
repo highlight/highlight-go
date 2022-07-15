@@ -63,6 +63,10 @@ var (
 )
 
 const backendSetupCooldown = 15
+
+// message channels should be large to avoid blocking request processing
+// in case of a surge of metrics or errors.
+const messageBufferSize = 1 << 16
 const metricCategory = "BACKEND"
 
 var (
@@ -172,10 +176,8 @@ type MetricInput struct {
 
 // init gets called once when you import the package
 func init() {
-	// message channels should be unbuffered to avoid blocking request processing
-	// in case of a surge of metrics or errors.
-	errorChan = make(chan BackendErrorObjectInput)
-	metricChan = make(chan MetricInput)
+	errorChan = make(chan BackendErrorObjectInput, messageBufferSize)
+	metricChan = make(chan MetricInput, messageBufferSize)
 	interruptChan = make(chan bool, 1)
 	signalChan = make(chan os.Signal, 1)
 
@@ -349,7 +351,11 @@ func ConsumeError(ctx context.Context, errorInput interface{}, tags ...string) {
 		convertedError.Event = graphql.String(fmt.Sprintf("%v", e))
 		convertedError.StackTrace = graphql.String(fmt.Sprintf("%v", e))
 	}
-	errorChan <- convertedError
+	select {
+	case errorChan <- convertedError:
+	default:
+		logger.Errorf("[highlight-go] error channel full. discarding value for %s", sessionSecureID)
+	}
 }
 
 // RecordMetric is used to record arbitrary metrics in your golang backend.
@@ -377,7 +383,11 @@ func RecordMetric(ctx context.Context, name string, value float64) {
 		Category:        &cat,
 		Timestamp:       time.Now().UTC(),
 	}
-	metricChan <- metric
+	select {
+	case metricChan <- metric:
+	default:
+		logger.Errorf("[highlight-go] metric channel full. discarding value for %s", sessionSecureID)
+	}
 }
 
 func validateRequest(ctx context.Context) (sessionSecureID string, requestID string, err error) {
