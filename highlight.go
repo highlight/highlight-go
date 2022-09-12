@@ -2,6 +2,7 @@ package highlight
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -203,7 +204,15 @@ func StartWithContext(ctx context.Context) {
 	if state == started {
 		return
 	}
-	client = graphql.NewClient(graphqlClientAddress, nil)
+	var httpClient *http.Client = nil
+	if graphqlClientAddress == "https://localhost:8082/public" {
+		httpClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		}
+	}
+	client = graphql.NewClient(graphqlClientAddress, httpClient)
 	state = started
 	go func() {
 		for {
